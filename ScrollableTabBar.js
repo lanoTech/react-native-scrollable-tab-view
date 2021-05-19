@@ -8,6 +8,7 @@ const {
   StyleSheet,
   ScrollView,
   Text,
+  Image,
   Platform,
   Dimensions,
 } = ReactNative;
@@ -51,6 +52,7 @@ const ScrollableTabBar = createReactClass({
     return {
       _leftTabUnderline: new Animated.Value(0),
       _widthTabUnderline: new Animated.Value(0),
+      _offsetValue: new Animated.Value(0),
       _containerWidth: null,
     };
   },
@@ -64,7 +66,7 @@ const ScrollableTabBar = createReactClass({
     const pageOffset = offset.value % 1;
     const tabCount = this.props.tabs.length;
     const lastTabPosition = tabCount - 1;
-
+   
     if (tabCount === 0 || offset.value < 0 || offset.value > lastTabPosition) {
       return;
     }
@@ -72,6 +74,8 @@ const ScrollableTabBar = createReactClass({
     if (this.necessarilyMeasurementsCompleted(position, position === lastTabPosition)) {
       this.updateTabPanel(position, pageOffset);
       this.updateTabUnderline(position, pageOffset, tabCount);
+      this.state._offsetValue.setValue(offset.value);
+     
     }
   },
 
@@ -106,6 +110,7 @@ const ScrollableTabBar = createReactClass({
   },
 
   updateTabUnderline(position, pageOffset, tabCount) {
+    const {tabUnderlineWidth=0} = this.props
     const lineLeft = this._tabsMeasurements[position].left;
     const lineRight = this._tabsMeasurements[position].right;
 
@@ -115,40 +120,45 @@ const ScrollableTabBar = createReactClass({
 
       const newLineLeft = (pageOffset * nextTabLeft + (1 - pageOffset) * lineLeft);
       const newLineRight = (pageOffset * nextTabRight + (1 - pageOffset) * lineRight);
-
-      this.state._leftTabUnderline.setValue(newLineLeft);
+      if (tabUnderlineWidth>0) {
+        this.state._leftTabUnderline.setValue((newLineRight-newLineLeft-tabUnderlineWidth)*0.5+newLineLeft);
+      }else{
+        this.state._leftTabUnderline.setValue(newLineLeft);
+      }
       this.state._widthTabUnderline.setValue(newLineRight - newLineLeft);
     } else {
-      this.state._leftTabUnderline.setValue(lineLeft);
+      if (tabUnderlineWidth>0) {
+        this.state._leftTabUnderline.setValue((lineRight-lineLeft-tabUnderlineWidth)*0.5+lineLeft);
+      }else{
+        this.state._leftTabUnderline.setValue(lineLeft);
+      }
       this.state._widthTabUnderline.setValue(lineRight - lineLeft);
     }
-  },
-
-  renderTab(name, page, isTabActive, onPressHandler, onLayoutHandler) {
-    const { activeTextColor, inactiveTextColor, textStyle, } = this.props;
-    const textColor = isTabActive ? activeTextColor : inactiveTextColor;
-    const fontWeight = isTabActive ? 'bold' : 'normal';
-
-    return <Button
-      key={`${name}_${page}`}
-      accessible={true}
-      accessibilityLabel={name}
-      accessibilityTraits='button'
-      onPress={() => onPressHandler(page)}
-      onLayout={onLayoutHandler}
-    >
-      <View style={[styles.tab, this.props.tabStyle, ]}>
-        <Text style={[{color: textColor, fontWeight, }, textStyle, ]}>
-          {name}
-        </Text>
-      </View>
-    </Button>;
   },
 
   measureTab(page, event) {
     const { x, width, height, } = event.nativeEvent.layout;
     this._tabsMeasurements[page] = {left: x, right: x + width, width, height, };
     this.updateView({value: this.props.scrollValue.__getValue(), });
+  },
+
+  animatedProperty(page,type,attribute){
+    const {activeStyle ={},inactiveStyle={}} = this.props;
+    if(!inactiveStyle[type]  || !activeStyle[type]) return null
+    const min = inactiveStyle[type][attribute]
+    const max = activeStyle[type][attribute]
+    const inputRange = []
+    let outputRange =[]
+    const tabCount = this.props.tabs.length
+    for (let index = 0; index <= tabCount; index++) {
+     inputRange.push(index)
+     outputRange.push(index === page?max:min)
+    }
+    const ranges = {
+      inputRange,
+      outputRange,
+    }
+   return {[attribute]:this.state._offsetValue.interpolate(ranges) }
   },
 
   render() {
@@ -158,12 +168,13 @@ const ScrollableTabBar = createReactClass({
       backgroundColor: 'navy',
       bottom: 0,
     };
-
+    const {activeStyle ={},inactiveStyle={} ,retabStyle} = this.props;
+  
     const dynamicTabUnderline = {
       left: this.state._leftTabUnderline,
       width: this.state._widthTabUnderline,
     };
-
+    
     return <View
       style={[styles.container, {backgroundColor: this.props.backgroundColor, }, this.props.style, ]}
       onLayout={this.onContainerLayout}
@@ -178,16 +189,32 @@ const ScrollableTabBar = createReactClass({
         scrollsToTop={false}
       >
         <View
-          style={[styles.tabs, {width: this.state._containerWidth, }, this.props.tabsContainerStyle, ]}
+          style={[styles.tabs, {width: this.state._containerWidth, }, this.props.tabsContainerStyle,]}
           ref={'tabContainer'}
           onLayout={this.onTabContainerLayout}
         >
+           <Animated.View style={[tabUnderlineStyle, dynamicTabUnderline, this.props.underlineStyle, ]} />
           {this.props.tabs.map((name, page) => {
-            const isTabActive = this.props.activeTab === page;
-            const renderTab = this.props.renderTab || this.renderTab;
-            return renderTab(name, page, isTabActive, this.props.goToPage, this.measureTab.bind(this, page));
+           const isTabActive = this.props.activeTab === page;
+           return (<Button
+            key={`${name}_${page}`}
+            onPress={() => this.props.goToPage(page)}
+            onLayout={this.measureTab.bind(this, page)}
+          >
+            <View style={[styles.tab, this.props.tabStyle,retabStyle ]}>
+                {typeof name === 'string' ? (
+                  <Animated.Text style={[isTabActive?activeStyle.text:inactiveStyle.text,this.animatedProperty(page,'text','color'),this.animatedProperty(page,'text','fontSize')]}>{name}</Animated.Text>
+                ) : (
+                  <Animated.Image
+                    style={[isTabActive?activeStyle.image:inactiveStyle.image,this.animatedProperty(page,'image','width')]}
+                    source={name}
+                    resizeMode='contain'
+                  />
+                )}
+            </View>
+          </Button>)
           })}
-          <Animated.View style={[tabUnderlineStyle, dynamicTabUnderline, this.props.underlineStyle, ]} />
+         
         </View>
       </ScrollView>
     </View>;
@@ -239,3 +266,4 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
   },
 });
+
